@@ -45,22 +45,46 @@ document.addEventListener('DOMContentLoaded', () => {
  * 保存配置到本地存储
  */
 function saveConfig() {
-    config.tcbEnvId = document.getElementById('tcb-envid').value.trim();
-    config.qwenApiKey = document.getElementById('qwen-apikey').value.trim();
+    try {
+        console.log('开始保存配置...');
 
-    if (!config.tcbEnvId) {
-        showToast('❌ 请填写腾讯云环境 ID');
-        return;
+        const envIdInput = document.getElementById('tcb-envid');
+        const keyInput = document.getElementById('qwen-apikey');
+
+        if (!envIdInput || !keyInput) {
+            alert('页面元素加载失败，请刷新重试');
+            return;
+        }
+
+        config.tcbEnvId = envIdInput.value.trim();
+        config.qwenApiKey = keyInput.value.trim();
+
+        console.log('环境ID:', config.tcbEnvId);
+
+        if (!config.tcbEnvId) {
+            alert('❌ 请填写腾讯云环境 ID');
+            return;
+        }
+
+        // 保存到浏览器本地存储
+        localStorage.setItem('tcb_envid', config.tcbEnvId);
+        localStorage.setItem('qwen_apikey', config.qwenApiKey);
+
+        console.log('本地存储已保存');
+
+        showMainPanel();
+
+        // 延迟初始化，确保界面切换完成
+        setTimeout(() => {
+            initCloudBase();
+            startGPS();
+        }, 100);
+
+        alert('✅ 配置已保存，正在初始化...');
+    } catch (error) {
+        console.error('保存配置出错:', error);
+        alert('出错: ' + error.message);
     }
-
-    // 保存到浏览器本地存储
-    localStorage.setItem('tcb_envid', config.tcbEnvId);
-    localStorage.setItem('qwen_apikey', config.qwenApiKey);
-
-    showMainPanel();
-    initCloudBase();
-    startGPS();
-    showToast('✅ 配置已保存');
 }
 
 /**
