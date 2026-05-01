@@ -1,0 +1,588 @@
+/**
+ * ParkQuest 踩点助手 - 主逻辑文件
+ * 功能：GPS定位、语音输入、AI生成、拍照保存、上传云端
+ */
+
+// ==================== 全局状态 ====================
+let currentPosition = null;        // 当前GPS坐标
+let savedTaskPoints = [];          // 本地保存的任务点列表
+let currentPhoto = null;           // 当前拍摄的照片(base64)
+let recognition = null;            // 语音识别对象
+let voiceTargetField = null;       // 语音输入目标字段ID
+let isAIVoice = false;             // 是否AI语音输入模式
+
+// 配置信息（从localStorage读取）
+let config = {
+    lcAppId: localStorage.getItem('lc_appid') || '',
+    lcAppKey: localStorage.getItem('lc_appkey') || '',
+    lcServer: localStorage.getItem('lc_server') || 'https://avoscloud.com',
+    qwenApiKey: localStorage.getItem('qwen_apikey') || ''
+};
+
+// ==================== 初始化 ====================
+document.addEventListener('DOMContentLoaded', () => {
+    // 初始化语音识别
+    initSpeechRecognition();
+
+    // 检查是否有保存的配置
+    if (config.lcAppId && config.lcAppKey) {
+        // 有配置，直接进入主界面
+        showMainPanel();
+        initLeanCloud();
+        startGPS();
+    } else {
+        // 无配置，显示配置面板，填充可能部分保存的值
+        document.getElementById('lc-appid').value = config.lcAppId;
+        document.getElementById('lc-appkey').value = config.lcAppKey;
+        document.getElementById('lc-server').value = config.lcServer;
+        document.getElementById('qwen-apikey').value = config.qwenApiKey;
+    }
+});
+
+// ==================== 配置管理 ====================
+
+/**
+ * 保存配置到本地存储
+ */
+function saveConfig() {
+    config.lcAppId = document.getElementById('lc-appid').value.trim();
+    config.lcAppKey = document.getElementById('lc-appkey').value.trim();
+    config.lcServer = document.getElementById('lc-server').value;
+    config.qwenApiKey = document.getElementById('qwen-apikey').value.trim();
+
+    if (!config.lcAppId || !config.lcAppKey) {
+        showToast('❌ 请填写 LeanCloud 配置');
+        return;
+    }
+
+    // 保存到浏览器本地存储
+    localStorage.setItem('lc_appid', config.lcAppId);
+    localStorage.setItem('lc_appkey', config.lcAppKey);
+    localStorage.setItem('lc_server', config.lcServer);
+    localStorage.setItem('qwen_apikey', config.qwenApiKey);
+
+    showMainPanel();
+    initLeanCloud();
+    startGPS();
+    showToast('✅ 配置已保存');
+}
+
+/**
+ * 切换到主界面
+ */
+function showMainPanel() {
+    document.getElementById('config-panel').classList.add('hidden');
+    document.getElementById('main-panel').classList.remove('hidden');
+}
+
+// ==================== LeanCloud 初始化 ====================
+
+/**
+ * 初始化 LeanCloud SDK
+ */
+function initLeanCloud() {
+    try {
+        AV.init({
+            appId: config.lcAppId,
+            appKey: config.lcAppKey,
+            serverURLs: config.lcServer
+        });
+        console.log('LeanCloud 初始化成功');
+    } catch (e) {
+        console.error('LeanCloud 初始化失败:', e);
+        showToast('⚠️ LeanCloud 连接失败');
+    }
+}
+
+// ==================== GPS 定位 ====================
+
+/**
+ * 开始监听 GPS 位置
+ */
+function startGPS() {
+    if (!navigator.geolocation) {
+        showToast('❌ 浏览器不支持定位');
+        return;
+    }
+
+    updateGPSStatus('正在获取位置...', 'loading');
+
+    // 使用 watchPosition 持续监听位置变化
+    navigator.geolocation.watchPosition(
+        (position) => {
+            currentPosition = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+                accuracy: position.coords.accuracy
+            };
+
+            const coordsText = `${currentPosition.lat.toFixed(6)}, ${currentPosition.lng.toFixed(6)}`;
+            document.getElementById('gps-coords').textContent =
+                `${coordsText} (精度: ${Math.round(currentPosition.accuracy)}米)`;
+            updateGPSStatus('📍 定位成功', 'success');
+        },
+        (error) => {
+            console.error('定位错误:', error);
+            updateGPSStatus('定位失败，请检查权限', 'error');
+        },
+        {
+            enableHighAccuracy: true,  // 高精度模式
+            timeout: 10000,            // 10秒超时
+            maximumAge: 0              // 不使用缓存位置
+        }
+    );
+}
+
+/**
+ * 手动刷新 GPS
+ */
+function refreshGPS() {
+    startGPS();
+    showToast('🔄 正在刷新位置...');
+}
+
+/**
+ * 更新 GPS 状态显示
+ */
+function updateGPSStatus(text, status) {
+    const statusEl = document.getElementById('gps-status');
+    const textEl = document.getElementById('gps-text');
+
+    textEl.textContent = text;
+
+    // 根据状态改变背景色
+    statusEl.style.background =
+        status === 'success' ? '#E8F5E9' :
+        status === 'error' ? '#FFEBEE' : '#E3F2FD';
+}
+
+// ==================== 语音识别 ====================
+
+/**
+ * 初始化 Web Speech API
+ */
+function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        console.warn('浏览器不支持语音识别');
+        return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.lang = 'zh-CN';        // 中文识别
+    recognition.continuous = false;     // 不连续识别
+    recognition.interimResults = true;  // 返回临时结果
+
+    // 识别到结果时触发
+    recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+        }
+
+        // 实时显示识别结果
+        const resultEl = document.getElementById('voice-result');
+        if (resultEl) resultEl.textContent = transcript;
+
+        // 如果是最终结果
+        if (!event.results[0].isFinal) return;
+
+        // 根据模式写入不同位置
+        if (isAIVoice) {
+            document.getElementById('ai-prompt').value = transcript;
+        } else if (voiceTargetField) {
+            const el = document.getElementById(voiceTargetField);
+            if (el) el.value = transcript;
+        }
+
+        closeVoiceModal();
+    };
+
+    // 识别错误时触发
+    recognition.onerror = (event) => {
+        console.error('语音识别错误:', event.error);
+        showToast('❌ 语音识别失败');
+        closeVoiceModal();
+    };
+
+    // 识别结束时触发
+    recognition.onend = () => {
+        closeVoiceModal();
+    };
+}
+
+/**
+ * 开始语音输入到指定字段
+ */
+function startVoiceInput(fieldId) {
+    if (!recognition) {
+        showToast('❌ 浏览器不支持语音输入');
+        return;
+    }
+
+    voiceTargetField = fieldId;
+    isAIVoice = false;
+    showVoiceModal();
+
+    try {
+        recognition.start();
+    } catch (e) {
+        showToast('❌ 无法启动语音识别');
+    }
+}
+
+/**
+ * 开始 AI 语音输入
+ */
+function startAIVoice(e) {
+    if (e) e.preventDefault();
+
+    if (!recognition) {
+        showToast('❌ 浏览器不支持语音输入');
+        return;
+    }
+
+    isAIVoice = true;
+    voiceTargetField = null;
+    showVoiceModal();
+
+    // 添加录音动画效果
+    const wave = document.getElementById('voice-wave');
+    if (wave) wave.classList.add('recording');
+
+    try {
+        recognition.start();
+    } catch (e) {
+        showToast('❌ 无法启动语音识别');
+    }
+}
+
+/**
+ * 停止 AI 语音输入
+ */
+function stopAIVoice() {
+    const wave = document.getElementById('voice-wave');
+    if (wave) wave.classList.remove('recording');
+
+    if (recognition) {
+        recognition.stop();
+    }
+}
+
+/**
+ * 显示语音弹窗
+ */
+function showVoiceModal() {
+    document.getElementById('voice-modal').classList.remove('hidden');
+    document.getElementById('voice-result').textContent = '';
+}
+
+/**
+ * 关闭语音弹窗
+ */
+function closeVoiceModal() {
+    const wave = document.getElementById('voice-wave');
+    if (wave) wave.classList.remove('recording');
+    document.getElementById('voice-modal').classList.add('hidden');
+}
+
+/**
+ * 取消语音输入
+ */
+function cancelVoice() {
+    if (recognition) recognition.stop();
+    closeVoiceModal();
+}
+
+// ==================== AI 生成 ====================
+
+/**
+ * 调用通义千问 API 生成任务点内容
+ */
+async function generateWithAI() {
+    const prompt = document.getElementById('ai-prompt').value.trim();
+
+    if (!prompt) {
+        showToast('❌ 请先描述你的想法');
+        return;
+    }
+
+    if (!config.qwenApiKey) {
+        showToast('❌ 请先配置通义千问 API Key');
+        document.getElementById('config-panel').classList.remove('hidden');
+        document.getElementById('main-panel').classList.add('hidden');
+        return;
+    }
+
+    showLoading('🤖 AI 正在创作...');
+
+    try {
+        const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.qwenApiKey}`
+            },
+            body: JSON.stringify({
+                model: 'qwen-turbo',
+                messages: [
+                    {
+                        role: 'system',
+                        content: `你是一个 AR 实景探秘游戏的剧情设计师。根据用户的想法，生成一个任务点的完整信息。
+请用以下 JSON 格式返回：
+{
+  "name": "任务点名称（简洁有趣）",
+  "clue": "给玩家的线索提示（简短）",
+  "hint": "详细提示（30-50字）",
+  "target": "AI识别用的目标描述（描述要找的目标外观特征）"
+}`
+                    },
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                response_format: { type: 'json_object' }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`API 错误: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const content = data.choices[0].message.content;
+        const result = JSON.parse(content);
+
+        // 填充表单
+        document.getElementById('task-name').value = result.name || '';
+        document.getElementById('task-clue').value = result.clue || '';
+        document.getElementById('task-hint').value = result.hint || '';
+        document.getElementById('task-target').value = result.target || '';
+
+        showToast('✅ AI 生成完成！');
+    } catch (error) {
+        console.error('AI 生成错误:', error);
+        showToast('❌ AI 生成失败: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// ==================== 拍照 ====================
+
+/**
+ * 处理照片选择/拍摄
+ */
+function onPhotoSelected(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        currentPhoto = e.target.result;  // base64 格式的图片
+        document.getElementById('photo-placeholder').classList.add('hidden');
+        document.getElementById('photo-preview').src = currentPhoto;
+        document.getElementById('photo-preview').classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+}
+
+// ==================== 本地保存 ====================
+
+/**
+ * 保存当前任务点到本地列表
+ */
+function saveTaskPoint() {
+    if (!currentPosition) {
+        showToast('❌ 请等待 GPS 定位成功');
+        return;
+    }
+
+    const name = document.getElementById('task-name').value.trim();
+    const clue = document.getElementById('task-clue').value.trim();
+    const hint = document.getElementById('task-hint').value.trim();
+    const target = document.getElementById('task-target').value.trim();
+
+    if (!name) {
+        showToast('❌ 请填写任务点名称');
+        return;
+    }
+
+    // 创建任务点对象
+    const taskPoint = {
+        id: Date.now(),
+        name,
+        clue,
+        hint,
+        target,
+        lat: currentPosition.lat,
+        lng: currentPosition.lng,
+        photo: currentPhoto,
+        createdAt: new Date().toISOString()
+    };
+
+    savedTaskPoints.push(taskPoint);
+    updateSavedList();
+    clearForm();
+
+    showToast('✅ 已保存到本地');
+}
+
+/**
+ * 更新已保存列表显示
+ */
+function updateSavedList() {
+    const listEl = document.getElementById('saved-list');
+    const countEl = document.getElementById('saved-count');
+    const uploadBtn = document.getElementById('upload-btn');
+
+    countEl.textContent = savedTaskPoints.length;
+    uploadBtn.disabled = savedTaskPoints.length === 0;
+
+    if (savedTaskPoints.length === 0) {
+        listEl.innerHTML = '<p class="empty-hint">暂无任务点，开始踩点吧！</p>';
+        return;
+    }
+
+    listEl.innerHTML = savedTaskPoints.map(tp => `
+        <div class="saved-item">
+            <div class="saved-item-info">
+                <h4>${tp.name}</h4>
+                <p>${tp.lat.toFixed(6)}, ${tp.lng.toFixed(6)}</p>
+            </div>
+            <div class="saved-item-actions">
+                ${tp.photo ? '<span>📷</span>' : ''}
+                <button class="btn-delete" onclick="deleteTaskPoint(${tp.id})">删除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * 删除任务点
+ */
+function deleteTaskPoint(id) {
+    if (!confirm('确定删除这个任务点吗？')) return;
+
+    savedTaskPoints = savedTaskPoints.filter(tp => tp.id !== id);
+    updateSavedList();
+}
+
+/**
+ * 清空表单
+ */
+function clearForm() {
+    document.getElementById('task-name').value = '';
+    document.getElementById('task-clue').value = '';
+    document.getElementById('task-hint').value = '';
+    document.getElementById('task-target').value = '';
+    document.getElementById('ai-prompt').value = '';
+
+    currentPhoto = null;
+    document.getElementById('photo-placeholder').classList.remove('hidden');
+    document.getElementById('photo-preview').classList.add('hidden');
+    document.getElementById('photo-input').value = '';
+}
+
+// ==================== 上传云端 ====================
+
+/**
+ * 批量上传所有任务点到 LeanCloud
+ */
+async function uploadAll() {
+    if (savedTaskPoints.length === 0) {
+        showToast('❌ 没有可上传的任务点');
+        return;
+    }
+
+    if (!config.lcAppId) {
+        showToast('❌ 请先配置 LeanCloud');
+        return;
+    }
+
+    showLoading(`☁️ 正在上传 ${savedTaskPoints.length} 个任务点...`);
+
+    try {
+        // 创建 LeanCloud 对象类
+        const Quest = AV.Object.extend('Quest');
+        const Task = AV.Object.extend('Task');
+
+        // 创建剧本（Quest）
+        const quest = new Quest();
+        quest.set('title', '新川公园西区踩点_' + new Date().toLocaleDateString());
+        quest.set('description', '网页版踩点助手采集的数据');
+        quest.set('location', '新川公园西区');
+        quest.set('status', 'draft');
+
+        const savedQuest = await quest.save();
+
+        // 上传每个任务点
+        for (let i = 0; i < savedTaskPoints.length; i++) {
+            const tp = savedTaskPoints[i];
+
+            const task = new Task();
+            task.set('questId', savedQuest.id);
+            task.set('order', i + 1);
+            task.set('name', tp.name);
+            task.set('clue', tp.clue);
+            task.set('hint', tp.hint);
+            task.set('targetDescription', tp.target);
+            task.set('latitude', tp.lat);
+            task.set('longitude', tp.lng);
+
+            // 如有照片则上传
+            if (tp.photo) {
+                const fileName = `task_${Date.now()}_${i}.jpg`;
+                const avFile = new AV.File(fileName, { base64: tp.photo.split(',')[1] });
+                const savedFile = await avFile.save();
+                task.set('referencePhotoUrl', savedFile.url());
+            }
+
+            await task.save();
+        }
+
+        showToast(`✅ 上传成功！剧本ID: ${savedQuest.id}`);
+
+        // 清空本地数据
+        savedTaskPoints = [];
+        updateSavedList();
+
+    } catch (error) {
+        console.error('上传错误:', error);
+        showToast('❌ 上传失败: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// ==================== UI 工具 ====================
+
+/**
+ * 显示加载中
+ */
+function showLoading(text = '处理中...') {
+    document.getElementById('loading-text').textContent = text;
+    document.getElementById('loading').classList.remove('hidden');
+}
+
+/**
+ * 隐藏加载中
+ */
+function hideLoading() {
+    document.getElementById('loading').classList.add('hidden');
+}
+
+/**
+ * 显示 Toast 提示
+ */
+function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+
+    setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 3000);
+}

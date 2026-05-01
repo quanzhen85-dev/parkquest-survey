@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ParkQuest 踩点助手</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- LeanCloud SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-live-query-min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- 头部 -->
+        <header class="header">
+            <h1>🎯 ParkQuest 踩点助手</h1>
+            <p class="subtitle">边走边记，AI 共创剧本</p>
+        </header>
+
+        <!-- 配置面板 -->
+        <div id="config-panel" class="panel">
+            <h3>⚙️ 初始配置</h3>
+            <div class="form-group">
+                <label>LeanCloud AppID</label>
+                <input type="text" id="lc-appid" placeholder="你的 LeanCloud AppID">
+            </div>
+            <div class="form-group">
+                <label>LeanCloud AppKey</label>
+                <input type="text" id="lc-appkey" placeholder="你的 LeanCloud AppKey">
+            </div>
+            <div class="form-group">
+                <label>服务器地址</label>
+                <select id="lc-server">
+                    <option value="https://avoscloud.com">国内版 (avoscloud.com)</option>
+                    <option value="https://us.avoscloud.com">国际版 (us.avoscloud.com)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>通义千问 API Key</label>
+                <input type="password" id="qwen-apikey" placeholder="sk-...">
+                <small>⚠️ 仅保存在本地浏览器中</small>
+            </div>
+            <button class="btn-primary" onclick="saveConfig()">💾 保存配置</button>
+        </div>
+
+        <!-- 主界面 -->
+        <div id="main-panel" class="panel hidden">
+            <!-- GPS 状态 -->
+            <div class="gps-status" id="gps-status">
+                <span class="gps-icon">📍</span>
+                <span id="gps-text">正在获取位置...</span>
+                <button class="btn-small" onclick="refreshGPS()">刷新</button>
+            </div>
+            <div id="gps-coords" class="gps-coords">--</div>
+
+            <!-- AI 共创区域 -->
+            <div class="ai-section">
+                <h3>🤖 AI 共创剧情</h3>
+                <p class="hint">描述你的想法，AI 帮你生成完整任务点</p>
+                <div class="voice-input-area">
+                    <button class="voice-btn" id="ai-voice-btn"
+                            ontouchstart="startAIVoice(event)"
+                            ontouchend="stopAIVoice()"
+                            onmousedown="startAIVoice(event)"
+                            onmouseup="stopAIVoice()"
+                            onmouseleave="stopAIVoice()">
+                        🎤
+                        <span class="voice-hint">长按说话</span>
+                    </button>
+                </div>
+                <textarea id="ai-prompt" placeholder="例如：这里有个石狮子，我想做一个历史探秘的主题..."></textarea>
+                <button class="btn-ai" onclick="generateWithAI()">
+                    ✨ AI 生成内容
+                </button>
+            </div>
+
+            <!-- 任务点表单 -->
+            <div class="form-section">
+                <h3>📝 任务点信息</h3>
+
+                <div class="form-group">
+                    <label>任务点名称</label>
+                    <div class="input-with-voice">
+                        <input type="text" id="task-name" placeholder="例如：神秘石狮子">
+                        <button class="voice-small-btn" onclick="startVoiceInput('task-name')">🎤</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>线索提示</label>
+                    <div class="input-with-voice">
+                        <input type="text" id="task-clue" placeholder="给玩家的线索，例如：在公园门口找守卫者">
+                        <button class="voice-small-btn" onclick="startVoiceInput('task-clue')">🎤</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>详细提示</label>
+                    <div class="input-with-voice">
+                        <textarea id="task-hint" placeholder="更详细的提示，例如：注意看石狮子的底座..." rows="3"></textarea>
+                        <button class="voice-small-btn" onclick="startVoiceInput('task-hint')">🎤</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>目标描述（AI识别用）</label>
+                    <div class="input-with-voice">
+                        <textarea id="task-target" placeholder="描述要找的目标，例如：一个石狮子雕像，底座有花纹" rows="3"></textarea>
+                        <button class="voice-small-btn" onclick="startVoiceInput('task-target')">🎤</button>
+                    </div>
+                </div>
+
+                <!-- 拍照区域 -->
+                <div class="photo-section">
+                    <label>📷 参考照片</label>
+                    <div class="photo-area" onclick="document.getElementById('photo-input').click()">
+                        <input type="file" id="photo-input" accept="image/*" capture="environment" onchange="onPhotoSelected(event)" style="display:none">
+                        <div id="photo-placeholder" class="photo-placeholder">
+                            <span class="camera-icon">📷</span>
+                            <p>点击拍照</p>
+                        </div>
+                        <img id="photo-preview" class="photo-preview hidden">
+                    </div>
+                </div>
+
+                <button class="btn-primary" onclick="saveTaskPoint()">
+                    💾 保存到本地
+                </button>
+            </div>
+
+            <!-- 已保存列表 -->
+            <div class="saved-section">
+                <h3>📋 已保存的任务点 (<span id="saved-count">0</span>)</h3>
+                <div id="saved-list" class="saved-list">
+                    <p class="empty-hint">暂无任务点，开始踩点吧！</p>
+                </div>
+                <button class="btn-upload" onclick="uploadAll()" id="upload-btn" disabled>
+                    ☁️ 一键上传到云端
+                </button>
+            </div>
+        </div>
+
+        <!-- 语音输入弹窗 -->
+        <div id="voice-modal" class="modal hidden">
+            <div class="modal-content voice-modal-content">
+                <div class="voice-wave" id="voice-wave">🎤</div>
+                <p id="voice-status">正在听...</p>
+                <p class="voice-result" id="voice-result"></p>
+                <button class="btn-cancel" onclick="cancelVoice()">取消</button>
+            </div>
+        </div>
+
+        <!-- 加载中 -->
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p id="loading-text">处理中...</p>
+        </div>
+
+        <!-- 提示消息 -->
+        <div id="toast" class="toast hidden"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
