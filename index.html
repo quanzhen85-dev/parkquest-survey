@@ -8,70 +8,92 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0f;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             color: #fff;
-            padding: 20px;
+            min-height: 100vh;
+            padding-bottom: 30px;
         }
         .header {
+            background: linear-gradient(135deg, #7b2cbf 0%, #00d4ff 100%);
+            padding: 30px 20px;
             text-align: center;
-            padding: 30px 0;
-            border-bottom: 2px solid #00d4ff;
-            margin-bottom: 20px;
         }
-        .header h1 {
-            color: #00d4ff;
-            font-size: 2rem;
-        }
-        .panel {
-            background: #12121a;
+        .header h1 { font-size: 1.8rem; }
+        .container { padding: 20px; max-width: 500px; margin: 0 auto; }
+        .card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 16px;
             padding: 20px;
-            border-radius: 12px;
             margin-bottom: 20px;
-            border: 1px solid #1e1e2e;
         }
         .hidden { display: none !important; }
+        h3 { color: #00d4ff; margin-bottom: 15px; }
         input, textarea {
             width: 100%;
             padding: 12px;
-            background: #0a0a0f;
-            border: 1px solid #1e1e2e;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
             border-radius: 8px;
             color: #fff;
-            margin: 10px 0;
+            margin-bottom: 10px;
             font-size: 1rem;
         }
         button {
             width: 100%;
             padding: 15px;
-            background: linear-gradient(135deg, #00d4ff 0%, #00a8cc 100%);
-            color: #000;
             border: none;
             border-radius: 8px;
             font-size: 1rem;
             font-weight: bold;
             cursor: pointer;
-            margin: 10px 0;
+            margin-bottom: 10px;
         }
-        button:disabled {
-            background: #333;
-            color: #666;
-            cursor: not-allowed;
+        .btn-primary { background: #00d4ff; color: #000; }
+        .btn-ai { background: #ff6b35; color: #fff; }
+        .btn-small { width: auto; padding: 10px 20px; background: rgba(255,255,255,0.2); }
+        .photo-box {
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: rgba(0,0,0,0.3);
+            border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin: 15px 0;
+            overflow: hidden;
+            position: relative;
         }
-        .gps-box {
-            background: rgba(0,212,255,0.1);
-            border: 1px solid #00d4ff;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            margin-bottom: 15px;
-        }
+        .photo-box img { width: 100%; height: 100%; object-fit: cover; position: absolute; }
         .task-item {
-            background: #1a1a2e;
+            background: rgba(255,255,255,0.05);
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
         }
-        #toast {
+        .loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .toast {
             position: fixed;
             bottom: 100px;
             left: 50%;
@@ -86,177 +108,250 @@
 </head>
 <body>
     <div class="header">
-        <h1>🎯 ParkQuest</h1>
-        <p>踩点助手 v2.0</p>
+        <h1>🧙 ParkQuest</h1>
+        <p>踩点助手</p>
     </div>
 
-    <!-- 配置页 -->
-    <div id="config-panel" class="panel">
-        <h3>⚙️ 配置</h3>
-        <input type="text" id="qwen-key" placeholder="通义千问 API Key (可选)">
-        <button onclick="startApp()">启动系统</button>
+    <div class="container">
+        <div id="config-page" class="card">
+            <h3>⚙️ 配置</h3>
+            <input type="password" id="api-key" placeholder="通义千问 API Key">
+            <button class="btn-primary" onclick="startApp()">启动</button>
+        </div>
+
+        <div id="main-page" class="hidden">
+            <div class="card">
+                <h3>🌿 植物 <span id="current-num">1</span>/7</h3>
+                <input type="text" id="plant-real" placeholder="植物真名（如：迷迭香）">
+                <input type="text" id="plant-magic" placeholder="魔药名称（如：龙息草）">
+
+                <button class="btn-small" onclick="getGPS()">📍 获取GPS</button>
+                <p id="gps-info" style="font-size: 0.8rem; color: #888; margin: 5px 0;"></p>
+
+                <div class="photo-box" onclick="document.getElementById('file-input').click()">
+                    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="handlePhoto(event)" style="display:none">
+                    <span id="photo-text">📷 点击拍照</span>
+                    <img id="photo-img" class="hidden">
+                </div>
+
+                <button class="btn-ai" onclick="generateDesc()" id="gen-btn" disabled>🤖 AI生成描述</button>
+                <textarea id="desc-text" rows="3" placeholder="AI生成的描述会显示在这里，可手动修改"></textarea>
+
+                <button class="btn-primary" onclick="savePlant()">💾 保存</button>
+            </div>
+
+            <div class="card">
+                <h3>📋 已采集 <span id="saved-count">0</span>/7</h3>
+                <div id="plant-list"></div>
+                <button onclick="exportData()">📥 导出数据</button>
+            </div>
+        </div>
     </div>
 
-    <!-- 主界面 -->
-    <div id="main-panel" class="panel hidden">
-        <div class="gps-box">
-            <p id="gps-status">📍 点击获取位置</p>
-            <p id="gps-coords" style="font-size: 0.8rem; color: #888; margin-top: 5px;">--</p>
-            <button onclick="getGPS()" style="margin-top: 10px; padding: 8px;">获取 GPS</button>
-        </div>
-
-        <h3 style="color: #00d4ff; margin-bottom: 15px;">📝 任务点信息</h3>
-        <input type="text" id="task-name" placeholder="任务点名称">
-        <input type="text" id="task-clue" placeholder="线索提示">
-        <textarea id="task-hint" rows="2" placeholder="详细提示"></textarea>
-        <textarea id="task-target" rows="2" placeholder="目标描述（AI识别用）"></textarea>
-
-        <div style="margin: 15px 0;">
-            <input type="file" id="photo-input" accept="image/*" capture="environment" onchange="loadPhoto(event)">
-            <img id="photo-preview" style="width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; display: none; margin-top: 10px;">
-        </div>
-
-        <button onclick="saveTask()">💾 保存任务点</button>
-
-        <div style="margin-top: 30px;">
-            <h3 style="color: #00d4ff; margin-bottom: 15px;">📋 已保存 (<span id="count">0</span>)</h3>
-            <div id="task-list"></div>
-        </div>
+    <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p style="margin-top: 15px; color: #888;">处理中...</p>
     </div>
 
-    <div id="toast"></div>
+    <div id="toast" class="toast"></div>
 
     <script>
-        // 全局变量
-        let currentPos = null;
-        let tasks = [];
+        let apiKey = '';
         let currentPhoto = null;
+        let plants = [];
+        let currentPos = null;
 
-        // 启动应用
         function startApp() {
-            document.getElementById('config-panel').classList.add('hidden');
-            document.getElementById('main-panel').classList.remove('hidden');
-            showToast('系统启动成功！');
+            apiKey = document.getElementById('api-key').value.trim();
+            document.getElementById('config-page').classList.add('hidden');
+            document.getElementById('main-page').classList.remove('hidden');
+            showToast('启动成功');
         }
 
-        // 获取 GPS
         function getGPS() {
-            document.getElementById('gps-status').textContent = '📍 定位中...';
-
             if (!navigator.geolocation) {
-                showToast('❌ 浏览器不支持定位');
+                showToast('不支持定位');
                 return;
             }
-
             navigator.geolocation.getCurrentPosition(
-                (pos) => {
+                pos => {
                     currentPos = {
                         lat: pos.coords.latitude.toFixed(6),
                         lng: pos.coords.longitude.toFixed(6)
                     };
-                    document.getElementById('gps-status').textContent = '✓ 定位成功';
-                    document.getElementById('gps-coords').textContent =
-                        `${currentPos.lat}, ${currentPos.lng} (精度: ${Math.round(pos.coords.accuracy)}米)`;
-                    showToast('📍 定位成功！');
+                    document.getElementById('gps-info').textContent = `${currentPos.lat}, ${currentPos.lng}`;
+                    showToast('定位成功');
                 },
-                (err) => {
-                    showToast('❌ 定位失败: ' + err.message);
-                    document.getElementById('gps-status').textContent = '❌ 定位失败，请检查权限';
-                },
-                { enableHighAccuracy: true, timeout: 10000 }
+                () => showToast('定位失败')
             );
         }
 
-        // 加载照片
-        function loadPhoto(e) {
+        function handlePhoto(e) {
             const file = e.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = (evt) => {
+            reader.onload = evt => {
                 currentPhoto = evt.target.result;
-                document.getElementById('photo-preview').src = currentPhoto;
-                document.getElementById('photo-preview').style.display = 'block';
+                document.getElementById('photo-img').src = currentPhoto;
+                document.getElementById('photo-img').classList.remove('hidden');
+                document.getElementById('photo-text').classList.add('hidden');
+                document.getElementById('gen-btn').disabled = false;
             };
             reader.readAsDataURL(file);
         }
 
-        // 保存任务
-        function saveTask() {
-            if (!currentPos) {
-                showToast('❌ 请先获取 GPS 位置');
+        async function generateDesc() {
+            if (!apiKey) {
+                showToast('未配置API Key');
+                return;
+            }
+            if (!currentPhoto) {
+                showToast('请先拍照');
                 return;
             }
 
-            const name = document.getElementById('task-name').value.trim();
-            if (!name) {
-                showToast('❌ 请填写任务点名称');
-                return;
+            showLoading(true);
+
+            try {
+                const base64 = currentPhoto.split(',')[1];
+
+                const res = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'qwen-vl-plus',
+                        messages: [{
+                            role: 'user',
+                            content: [
+                                { type: 'image', image: base64 },
+                                { type: 'text', text: '描述这张图片中的植物特征，用于让玩家在公园里找到这种植物。描述要简洁（50字以内），突出视觉特征。' }
+                            ]
+                        }]
+                    })
+                });
+
+                const data = await res.json();
+                const desc = data.choices[0].message.content;
+                document.getElementById('desc-text').value = desc;
+                showToast('生成成功');
+            } catch(err) {
+                showToast('生成失败: ' + err.message);
+            } finally {
+                showLoading(false);
             }
-
-            const task = {
-                id: Date.now(),
-                name: name,
-                clue: document.getElementById('task-clue').value,
-                hint: document.getElementById('task-hint').value,
-                target: document.getElementById('task-target').value,
-                lat: currentPos.lat,
-                lng: currentPos.lng,
-                photo: currentPhoto,
-                time: new Date().toLocaleString()
-            };
-
-            tasks.push(task);
-            updateTaskList();
-            clearForm();
-            showToast('✅ 保存成功！');
         }
 
-        // 更新列表
-        function updateTaskList() {
-            document.getElementById('count').textContent = tasks.length;
-            const list = document.getElementById('task-list');
+        function savePlant() {
+            const realName = document.getElementById('plant-real').value.trim();
+            const magicName = document.getElementById('plant-magic').value.trim();
+            const desc = document.getElementById('desc-text').value.trim();
 
-            if (tasks.length === 0) {
-                list.innerHTML = '<p style="color: #666; text-align: center;">暂无任务点</p>';
+            if (!realName || !magicName) {
+                showToast('请填写植物名称');
+                return;
+            }
+            if (!currentPhoto) {
+                showToast('请拍照');
                 return;
             }
 
-            list.innerHTML = tasks.map(t => `
+            plants.push({
+                id: Date.now(),
+                realName,
+                magicName,
+                desc,
+                photo: currentPhoto,
+                gps: currentPos,
+                time: new Date().toLocaleString()
+            });
+
+            updateList();
+            clearForm();
+
+            if (plants.length >= 7) {
+                showToast('🎉 7种植物采集完成！');
+            } else {
+                showToast(`✅ 已保存 (${plants.length}/7)`);
+                document.getElementById('current-num').textContent = plants.length + 1;
+            }
+        }
+
+        function updateList() {
+            document.getElementById('saved-count').textContent = plants.length;
+            const list = document.getElementById('plant-list');
+
+            if (plants.length === 0) {
+                list.innerHTML = '<p style="color: #888;">暂无</p>';
+                return;
+            }
+
+            list.innerHTML = plants.map((p, i) => `
                 <div class="task-item">
-                    <h4>${t.name}</h4>
-                    <p style="font-size: 0.8rem; color: #888;">${t.lat}, ${t.lng}</p>
-                    ${t.photo ? '<p>📷 有照片</p>' : ''}
-                    <button onclick="deleteTask(${t.id})" style="margin-top: 10px; background: #ff3366;">删除</button>
+                    <div>
+                        <strong>${i+1}. ${p.realName}</strong> → ${p.magicName}
+                        ${p.gps ? '📍' : ''}
+                    </div>
+                    <button class="btn-small" onclick="deletePlant(${p.id})" style="width: auto;">删除</button>
                 </div>
             `).join('');
         }
 
-        // 删除任务
-        function deleteTask(id) {
-            tasks = tasks.filter(t => t.id !== id);
-            updateTaskList();
-            showToast('已删除');
+        function deletePlant(id) {
+            plants = plants.filter(p => p.id !== id);
+            updateList();
+            document.getElementById('current-num').textContent = plants.length + 1;
         }
 
-        // 清空表单
         function clearForm() {
-            document.getElementById('task-name').value = '';
-            document.getElementById('task-clue').value = '';
-            document.getElementById('task-hint').value = '';
-            document.getElementById('task-target').value = '';
-            document.getElementById('photo-input').value = '';
-            document.getElementById('photo-preview').style.display = 'none';
+            document.getElementById('plant-real').value = '';
+            document.getElementById('plant-magic').value = '';
+            document.getElementById('desc-text').value = '';
+            document.getElementById('photo-img').classList.add('hidden');
+            document.getElementById('photo-text').classList.remove('hidden');
+            document.getElementById('gen-btn').disabled = true;
             currentPhoto = null;
         }
 
-        // 显示提示
+        function exportData() {
+            if (plants.length === 0) {
+                showToast('没有数据');
+                return;
+            }
+
+            const data = {
+                title: '哈利波特魔药课',
+                location: '新川公园西区',
+                createdAt: new Date().toISOString(),
+                plants: plants
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `parkquest_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showToast('导出成功');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('hidden', !show);
+        }
+
         function showToast(msg) {
             const toast = document.getElementById('toast');
             toast.textContent = msg;
             toast.style.display = 'block';
             setTimeout(() => toast.style.display = 'none', 3000);
         }
+
+        updateList();
     </script>
 </body>
 </html>
