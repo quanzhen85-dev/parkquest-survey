@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ParkQuest 踩点助手</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding-bottom: 30px;
+        }
+        .header {
+            background: linear-gradient(135deg, #7b2cbf 0%, #00d4ff 100%);
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 { font-size: 1.8rem; }
+        .container { padding: 20px; max-width: 500px; margin: 0 auto; }
+        .card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .hidden { display: none !important; }
+        h3 { color: #00d4ff; margin-bottom: 15px; }
+        input, textarea {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: #fff;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+        .btn-primary { background: #00d4ff; color: #000; }
+        .btn-ai { background: #ff6b35; color: #fff; }
+        .btn-small { width: auto; padding: 10px 20px; background: rgba(255,255,255,0.2); }
+        .photo-box {
+            width: 100%;
+            aspect-ratio: 4/3;
+            background: rgba(0,0,0,0.3);
+            border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            margin: 15px 0;
+            overflow: hidden;
+            position: relative;
+        }
+        .photo-box img { width: 100%; height: 100%; object-fit: cover; position: absolute; }
+        .task-item {
+            background: rgba(255,255,255,0.05);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #00d4ff;
+            color: #000;
+            padding: 15px 30px;
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧙 ParkQuest</h1>
+        <p>踩点助手</p>
+    </div>
+
+    <div class="container">
+        <div id="config-page" class="card">
+            <h3>⚙️ 配置</h3>
+            <input type="password" id="api-key" placeholder="通义千问 API Key">
+            <button class="btn-primary" onclick="startApp()">启动</button>
+        </div>
+
+        <div id="main-page" class="hidden">
+            <div class="card">
+                <h3>🌿 植物 <span id="current-num">1</span>/7</h3>
+                <input type="text" id="plant-real" placeholder="植物真名（如：迷迭香）">
+                <input type="text" id="plant-magic" placeholder="魔药名称（如：龙息草）">
+
+                <button class="btn-small" onclick="getGPS()">📍 获取GPS</button>
+                <p id="gps-info" style="font-size: 0.8rem; color: #888; margin: 5px 0;"></p>
+
+                <div class="photo-box" onclick="document.getElementById('file-input').click()">
+                    <input type="file" id="file-input" accept="image/*" capture="environment" onchange="handlePhoto(event)" style="display:none">
+                    <span id="photo-text">📷 点击拍照</span>
+                    <img id="photo-img" class="hidden">
+                </div>
+
+                <button class="btn-ai" onclick="generateDesc()" id="gen-btn" disabled>🤖 AI生成描述</button>
+                <textarea id="desc-text" rows="3" placeholder="AI生成的描述会显示在这里，可手动修改"></textarea>
+
+                <button class="btn-primary" onclick="savePlant()">💾 保存</button>
+            </div>
+
+            <div class="card">
+                <h3>📋 已采集 <span id="saved-count">0</span>/7</h3>
+                <div id="plant-list"></div>
+                <button onclick="exportData()">📥 导出数据</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p style="margin-top: 15px; color: #888;">处理中...</p>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        let apiKey = '';
+        let currentPhoto = null;
+        let plants = [];
+        let currentPos = null;
+
+        // CloudBase云函数地址
+        const CLOUDBASE_URL = 'https://parkquest-d8gwgqwd93860435d.service.tcloudbase.com/generateDesc';
+
+        function startApp() {
+            apiKey = document.getElementById('api-key').value.trim();
+            document.getElementById('config-page').classList.add('hidden');
+            document.getElementById('main-page').classList.remove('hidden');
+            showToast('启动成功');
+        }
+
+        function getGPS() {
+            if (!navigator.geolocation) {
+                showToast('不支持定位');
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                pos => {
+                    currentPos = {
+                        lat: pos.coords.latitude.toFixed(6),
+                        lng: pos.coords.longitude.toFixed(6)
+                    };
+                    document.getElementById('gps-info').textContent = `${currentPos.lat}, ${currentPos.lng}`;
+                    showToast('定位成功');
+                },
+                () => showToast('定位失败')
+            );
+        }
+
+        function handlePhoto(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = evt => {
+                currentPhoto = evt.target.result;
+                document.getElementById('photo-img').src = currentPhoto;
+                document.getElementById('photo-img').classList.remove('hidden');
+                document.getElementById('photo-text').classList.add('hidden');
+                document.getElementById('gen-btn').disabled = false;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function generateDesc() {
+            if (!currentPhoto) {
+                showToast('请先拍照');
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                // 提取base64（去掉data:image/jpeg;base64,前缀）
+                const base64 = currentPhoto.split(',')[1];
+
+                // 调用CloudBase云函数
+                const res = await fetch(CLOUDBASE_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        imageBase64: base64,
+                        prompt: '描述这张图片中的植物特征，用于让玩家在公园里找到这种植物。描述要简洁（50字以内），突出视觉特征。'
+                    })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    document.getElementById('desc-text').value = data.description;
+                    showToast('生成成功');
+                } else {
+                    showToast('生成失败: ' + (data.message || '未知错误'));
+                    console.error('云函数返回错误:', data);
+                }
+            } catch(err) {
+                showToast('请求失败: ' + err.message);
+                console.error('请求异常:', err);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function savePlant() {
+            const realName = document.getElementById('plant-real').value.trim();
+            const magicName = document.getElementById('plant-magic').value.trim();
+            const desc = document.getElementById('desc-text').value.trim();
+
+            if (!realName || !magicName) {
+                showToast('请填写植物名称');
+                return;
+            }
+            if (!currentPhoto) {
+                showToast('请拍照');
+                return;
+            }
+
+            plants.push({
+                id: Date.now(),
+                realName,
+                magicName,
+                desc,
+                photo: currentPhoto,
+                gps: currentPos,
+                time: new Date().toLocaleString()
+            });
+
+            updateList();
+            clearForm();
+
+            if (plants.length >= 7) {
+                showToast('🎉 7种植物采集完成！');
+            } else {
+                showToast(`✅ 已保存 (${plants.length}/7)`);
+                document.getElementById('current-num').textContent = plants.length + 1;
+            }
+        }
+
+        function updateList() {
+            document.getElementById('saved-count').textContent = plants.length;
+            const list = document.getElementById('plant-list');
+
+            if (plants.length === 0) {
+                list.innerHTML = '<p style="color: #888;">暂无</p>';
+                return;
+            }
+
+            list.innerHTML = plants.map((p, i) => `
+                <div class="task-item">
+                    <div>
+                        <strong>${i+1}. ${p.realName}</strong> → ${p.magicName}
+                        ${p.gps ? '📍' : ''}
+                    </div>
+                    <button class="btn-small" onclick="deletePlant(${p.id})" style="width: auto;">删除</button>
+                </div>
+            `).join('');
+        }
+
+        function deletePlant(id) {
+            plants = plants.filter(p => p.id !== id);
+            updateList();
+            document.getElementById('current-num').textContent = plants.length + 1;
+        }
+
+        function clearForm() {
+            document.getElementById('plant-real').value = '';
+            document.getElementById('plant-magic').value = '';
+            document.getElementById('desc-text').value = '';
+            document.getElementById('photo-img').classList.add('hidden');
+            document.getElementById('photo-text').classList.remove('hidden');
+            document.getElementById('gen-btn').disabled = true;
+            currentPhoto = null;
+        }
+
+        function exportData() {
+            if (plants.length === 0) {
+                showToast('没有数据');
+                return;
+            }
+
+            const data = {
+                title: '哈利波特魔药课',
+                location: '新川公园西区',
+                createdAt: new Date().toISOString(),
+                plants: plants
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `parkquest_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showToast('导出成功');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('hidden', !show);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }
+
+        updateList();
+    </script>
+</body>
+</html>
