@@ -13,11 +13,13 @@ let isAIVoice = false;             // 是否AI语音输入模式
 
 // 配置信息（从localStorage读取）
 let config = {
-    lcAppId: localStorage.getItem('lc_appid') || '',
-    lcAppKey: localStorage.getItem('lc_appkey') || '',
-    lcServer: localStorage.getItem('lc_server') || 'https://avoscloud.com',
+    tcbEnvId: localStorage.getItem('tcb_envid') || '',
     qwenApiKey: localStorage.getItem('qwen_apikey') || ''
 };
+
+// 腾讯云开发实例
+let app = null;
+let db = null;
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,16 +27,14 @@ document.addEventListener('DOMContentLoaded', () => {
     initSpeechRecognition();
 
     // 检查是否有保存的配置
-    if (config.lcAppId && config.lcAppKey) {
+    if (config.tcbEnvId) {
         // 有配置，直接进入主界面
         showMainPanel();
-        initLeanCloud();
+        initCloudBase();
         startGPS();
     } else {
         // 无配置，显示配置面板，填充可能部分保存的值
-        document.getElementById('lc-appid').value = config.lcAppId;
-        document.getElementById('lc-appkey').value = config.lcAppKey;
-        document.getElementById('lc-server').value = config.lcServer;
+        document.getElementById('tcb-envid').value = config.tcbEnvId;
         document.getElementById('qwen-apikey').value = config.qwenApiKey;
     }
 });
@@ -45,24 +45,20 @@ document.addEventListener('DOMContentLoaded', () => {
  * 保存配置到本地存储
  */
 function saveConfig() {
-    config.lcAppId = document.getElementById('lc-appid').value.trim();
-    config.lcAppKey = document.getElementById('lc-appkey').value.trim();
-    config.lcServer = document.getElementById('lc-server').value;
+    config.tcbEnvId = document.getElementById('tcb-envid').value.trim();
     config.qwenApiKey = document.getElementById('qwen-apikey').value.trim();
 
-    if (!config.lcAppId || !config.lcAppKey) {
-        showToast('❌ 请填写 LeanCloud 配置');
+    if (!config.tcbEnvId) {
+        showToast('❌ 请填写腾讯云环境 ID');
         return;
     }
 
     // 保存到浏览器本地存储
-    localStorage.setItem('lc_appid', config.lcAppId);
-    localStorage.setItem('lc_appkey', config.lcAppKey);
-    localStorage.setItem('lc_server', config.lcServer);
+    localStorage.setItem('tcb_envid', config.tcbEnvId);
     localStorage.setItem('qwen_apikey', config.qwenApiKey);
 
     showMainPanel();
-    initLeanCloud();
+    initCloudBase();
     startGPS();
     showToast('✅ 配置已保存');
 }
@@ -75,22 +71,32 @@ function showMainPanel() {
     document.getElementById('main-panel').classList.remove('hidden');
 }
 
-// ==================== LeanCloud 初始化 ====================
+// ==================== 腾讯云开发初始化 ====================
 
 /**
- * 初始化 LeanCloud SDK
+ * 初始化腾讯云开发 CloudBase
  */
-function initLeanCloud() {
+function initCloudBase() {
     try {
-        AV.init({
-            appId: config.lcAppId,
-            appKey: config.lcAppKey,
-            serverURLs: config.lcServer
+        // 初始化 CloudBase 应用
+        app = tcb.init({
+            env: config.tcbEnvId
         });
-        console.log('LeanCloud 初始化成功');
+
+        // 匿名登录
+        app.auth().anonymousAuthProvider().signIn().then(() => {
+            console.log('腾讯云开发登录成功');
+        }).catch(err => {
+            console.error('登录失败:', err);
+            showToast('⚠️ 登录失败，请检查环境 ID');
+        });
+
+        // 获取数据库实例
+        db = app.database();
+        console.log('腾讯云开发初始化成功');
     } catch (e) {
-        console.error('LeanCloud 初始化失败:', e);
-        showToast('⚠️ LeanCloud 连接失败');
+        console.error('腾讯云开发初始化失败:', e);
+        showToast('⚠️ 腾讯云连接失败');
     }
 }
 
@@ -489,7 +495,7 @@ function clearForm() {
 // ==================== 上传云端 ====================
 
 /**
- * 批量上传所有任务点到 LeanCloud
+ * 批量上传所有任务点到腾讯云开发
  */
 async function uploadAll() {
     if (savedTaskPoints.length === 0) {
@@ -497,53 +503,62 @@ async function uploadAll() {
         return;
     }
 
-    if (!config.lcAppId) {
-        showToast('❌ 请先配置 LeanCloud');
+    if (!config.tcbEnvId) {
+        showToast('❌ 请先配置腾讯云开发');
         return;
     }
 
     showLoading(`☁️ 正在上传 ${savedTaskPoints.length} 个任务点...`);
 
     try {
-        // 创建 LeanCloud 对象类
-        const Quest = AV.Object.extend('Quest');
-        const Task = AV.Object.extend('Task');
+        // 创建剧本（Quest）集合
+        const questResult = await db.collection('quests').add({
+            data: {
+                title: '新川公园西区踩点_' + new Date().toLocaleDateString(),
+                description: '网页版踩点助手采集的数据',
+                location: '新川公园西区',
+                status: 'draft',
+                createdAt: new Date()
+            }
+        });
 
-        // 创建剧本（Quest）
-        const quest = new Quest();
-        quest.set('title', '新川公园西区踩点_' + new Date().toLocaleDateString());
-        quest.set('description', '网页版踩点助手采集的数据');
-        quest.set('location', '新川公园西区');
-        quest.set('status', 'draft');
-
-        const savedQuest = await quest.save();
+        const questId = questResult._id;
 
         // 上传每个任务点
         for (let i = 0; i < savedTaskPoints.length; i++) {
             const tp = savedTaskPoints[i];
 
-            const task = new Task();
-            task.set('questId', savedQuest.id);
-            task.set('order', i + 1);
-            task.set('name', tp.name);
-            task.set('clue', tp.clue);
-            task.set('hint', tp.hint);
-            task.set('targetDescription', tp.target);
-            task.set('latitude', tp.lat);
-            task.set('longitude', tp.lng);
+            let photoUrl = null;
 
             // 如有照片则上传
             if (tp.photo) {
                 const fileName = `task_${Date.now()}_${i}.jpg`;
-                const avFile = new AV.File(fileName, { base64: tp.photo.split(',')[1] });
-                const savedFile = await avFile.save();
-                task.set('referencePhotoUrl', savedFile.url());
+                const base64Data = tp.photo.split(',')[1];
+                const uploadResult = await app.uploadFile({
+                    cloudPath: `photos/${fileName}`,
+                    fileContent: base64Data
+                });
+                photoUrl = uploadResult.fileID;
             }
 
-            await task.save();
+            // 创建任务点（Task）集合
+            await db.collection('tasks').add({
+                data: {
+                    questId: questId,
+                    order: i + 1,
+                    name: tp.name,
+                    clue: tp.clue,
+                    hint: tp.hint,
+                    targetDescription: tp.target,
+                    latitude: tp.lat,
+                    longitude: tp.lng,
+                    photoUrl: photoUrl,
+                    createdAt: new Date()
+                }
+            });
         }
 
-        showToast(`✅ 上传成功！剧本ID: ${savedQuest.id}`);
+        showToast(`✅ 上传成功！剧本ID: ${questId}`);
 
         // 清空本地数据
         savedTaskPoints = [];

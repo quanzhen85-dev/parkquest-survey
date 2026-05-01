@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ParkQuest 踩点助手</title>
     <link rel="stylesheet" href="style.css">
-    <!-- LeanCloud SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-live-query-min.js"></script>
+    <!-- 腾讯云开发 CloudBase SDK -->
+    <script src="https://imgcache.qq.com/qcloud/tcbjs/1.10.0/tcb.js"></script>
 </head>
 <body>
     <div id="app">
@@ -20,19 +20,9 @@
         <div id="config-panel" class="panel">
             <h3>⚙️ 初始配置</h3>
             <div class="form-group">
-                <label>LeanCloud AppID</label>
-                <input type="text" id="lc-appid" placeholder="你的 LeanCloud AppID">
-            </div>
-            <div class="form-group">
-                <label>LeanCloud AppKey</label>
-                <input type="text" id="lc-appkey" placeholder="你的 LeanCloud AppKey">
-            </div>
-            <div class="form-group">
-                <label>服务器地址</label>
-                <select id="lc-server">
-                    <option value="https://avoscloud.com">国内版 (avoscloud.com)</option>
-                    <option value="https://us.avoscloud.com">国际版 (us.avoscloud.com)</option>
-                </select>
+                <label>腾讯云环境 ID (envId)</label>
+                <input type="text" id="tcb-envid" placeholder="例如：parkquest-xxx">
+                <small>在腾讯云开发控制台 → 环境 → 环境 ID</small>
             </div>
             <div class="form-group">
                 <label>通义千问 API Key</label>
