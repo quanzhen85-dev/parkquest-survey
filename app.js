@@ -108,33 +108,85 @@ function initCloudBase() {
 function startGPS() {
     if (!navigator.geolocation) {
         showToast('❌ 浏览器不支持定位');
+        document.getElementById('gps-text').textContent = '浏览器不支持';
         return;
     }
 
-    updateGPSStatus('正在获取位置...', 'loading');
+    document.getElementById('gps-text').textContent = '定位中...';
+    document.getElementById('gps-coords').textContent = '正在请求位置权限...';
 
-    // 使用 watchPosition 持续监听位置变化
-    navigator.geolocation.watchPosition(
+    // 首先使用 getCurrentPosition 获取一次位置（触发权限请求）
+    navigator.geolocation.getCurrentPosition(
         (position) => {
-            currentPosition = {
-                lat: position.coords.latitude,
-                lng: position.coords.longitude,
-                accuracy: position.coords.accuracy
-            };
-
-            const coordsText = `${currentPosition.lat.toFixed(6)}, ${currentPosition.lng.toFixed(6)}`;
-            document.getElementById('gps-coords').textContent =
-                `${coordsText} (精度: ${Math.round(currentPosition.accuracy)}米)`;
-            updateGPSStatus('📍 定位成功', 'success');
+            // 获取成功，更新位置
+            updatePosition(position);
+            // 然后持续监听
+            startWatchPosition();
         },
         (error) => {
-            console.error('定位错误:', error);
-            updateGPSStatus('定位失败，请检查权限', 'error');
+            handleGPSError(error);
         },
         {
-            enableHighAccuracy: true,  // 高精度模式
-            timeout: 10000,            // 10秒超时
-            maximumAge: 0              // 不使用缓存位置
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+        }
+    );
+}
+
+/**
+ * 更新位置信息
+ */
+function updatePosition(position) {
+    currentPosition = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy
+    };
+
+    const coordsText = `${currentPosition.lat.toFixed(6)}, ${currentPosition.lng.toFixed(6)}`;
+    document.getElementById('gps-coords').textContent =
+        `${coordsText} (精度: ${Math.round(currentPosition.accuracy)}米)`;
+    document.getElementById('gps-text').textContent = '✓ 定位成功';
+    document.getElementById('gps-status').style.background = 'rgba(0,255,136,0.1)';
+    document.getElementById('gps-status').style.borderColor = 'var(--success)';
+}
+
+/**
+ * 处理 GPS 错误
+ */
+function handleGPSError(error) {
+    console.error('定位错误:', error);
+    let message = '定位失败';
+    switch(error.code) {
+        case error.PERMISSION_DENIED:
+            message = '请允许位置权限';
+            break;
+        case error.POSITION_UNAVAILABLE:
+            message = '无法获取位置信息';
+            break;
+        case error.TIMEOUT:
+            message = '定位超时，请重试';
+            break;
+    }
+    document.getElementById('gps-text').textContent = '✗ ' + message;
+    document.getElementById('gps-coords').textContent = '点击刷新按钮重试';
+    document.getElementById('gps-status').style.background = 'rgba(255,51,102,0.1)';
+    document.getElementById('gps-status').style.borderColor = 'var(--error)';
+    showToast('❌ ' + message);
+}
+
+/**
+ * 持续监听位置
+ */
+function startWatchPosition() {
+    navigator.geolocation.watchPosition(
+        updatePosition,
+        handleGPSError,
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
         }
     );
 }
